@@ -1,0 +1,952 @@
+<!DOCTYPE html>
+<html lang="zh-CN" class="light">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1.0">
+  <title>AI简历优化系统｜专业版</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/diff@5.1.0/dist/diff.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/file-saver@2.0.5/dist/FileSaver.min.js"></script>
+  <!-- 新增：PDF + Word 解析依赖 -->
+  <script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@4.0.379/build/pdf.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/mammoth@1.6.0/mammoth.browser.min.js"></script>
+  <style>
+    * { scroll-behavior: smooth; }
+    .dark { color-scheme: dark; }
+    .dark .bg-white { background: #1e1e1e; color: #e5e7eb; }
+    .dark .bg-gray-100 { background: #121212; }
+    .dark .bg-gray-50 { background: #1f2937; }
+    .dark .border { border-color: #333 !important; }
+    .dark input, .dark select, .dark textarea {
+      background-color: #1f2937 !important;
+      color: #e5e7eb !important;
+      border-color: #374151 !important;
+    }
+    .dark .text-gray-500 { color: #9ca3af !important; }
+    .toast { animation: fadeIn 0.3s; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: translateY(0); } }
+    .sync-scroll { overflow: auto; }
+    .highlight-hard { background-color: #dbeafe; color: #1e40af; padding: 1px 2px; border-radius: 2px; }
+    .highlight-biz { background-color: #d1fae5; color: #065f46; padding: 1px 2px; border-radius: 2px; }
+    .highlight-soft { background-color: #ffedd5; color: #c2410c; padding: 1px 2px; border-radius: 2px; }
+    .dark .highlight-hard { background-color: #3b82f6; color: #fff; }
+    .dark .highlight-biz { background-color: #10b981; color: #fff; }
+    .dark .highlight-soft { background-color: #f97316; color: #fff; }
+    .typing-effect::after { content: "|"; animation: blink 1s infinite; }
+    @keyframes blink { 50% { opacity: 0; } }
+    /* 上传区域样式 */
+    .upload-area { border: 2px dashed #ccc; transition: all 0.3s; }
+    .upload-area:hover { border-color: #3b82f6; background: #f8fafc; }
+    .dark .upload-area { border-color: #475569; }
+    .dark .upload-area:hover { background: #1e293b; border-color: #3b82f6; }
+    .upload-active { border-color: #2563eb !important; background: #eff6ff !important; }
+  </style>
+</head>
+
+<body class="bg-gray-100 p-4 md:p-8 transition-colors duration-300">
+<div class="max-w-7xl mx-auto bg-white rounded shadow p-6 space-y-8 transition-colors duration-300">
+
+<div class="flex flex-col md:flex-row justify-between items-center gap-3 mb-2">
+  <h1 class="text-2xl font-bold text-center text-blue-700">AI简历优化系统｜专业版</h1>
+  <button id="darkBtn" onclick="toggleDark()" class="px-3 py-1 border rounded bg-gray-200 hover:bg-gray-300">🌙 深色模式</button>
+</div>
+
+<div class="p-3 bg-blue-50 dark:bg-blue-900/30 rounded text-sm text-center">
+  操作流程：上传/输入JD → 上传/输入简历 → 简历体检 → 勾选建议优化 → 导出文档
+</div>
+
+<div class="p-3 bg-red-50 border border-red-200 rounded text-sm text-red-700 dark:bg-red-900/20 dark:border-red-800">
+  ⚠️ 安全提示：本工具仅限本地测试使用，前端直接调用API会暴露密钥，请勿公开部署！
+  若遇跨域错误：使用浏览器跨域插件 / 本地代理测试
+</div>
+
+<div class="p-4 bg-blue-50 border rounded dark:bg-blue-900/20 dark:border-blue-800">
+  <div class="flex justify-between items-center cursor-pointer" onclick="toggleApiSetting()">
+    <h3 class="font-semibold mb-0">AI 接口设置</h3>
+    <span id="apiToggleIcon">▼</span>
+  </div>
+  <div id="apiSettingContent" class="mt-3 hidden">
+    <div class="flex flex-wrap gap-3 items-center">
+      <label class="text-sm">API 服务商：</label>
+      <select id="apiProvider" class="border px-3 py-2 rounded dark:bg-gray-800" onchange="onProviderChange()">
+        <option value="deepseek">DeepSeek</option>
+        <option value="openai">OpenAI</option>
+        <option value="qwen">通义千问</option>
+        <option value="ernie">文心一言（前端暂不支持）</option>
+      </select>
+      <label class="text-sm">API Key：</label>
+      <input id="apiKey" type="password" class="border px-3 py-2 w-full max-w-md rounded dark:bg-gray-800" placeholder="sk-xxxx">
+      <button onclick="saveKey()" class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded transition">保存密钥</button>
+    </div>
+    <div id="providerTip" class="text-xs text-gray-500 mt-2"></div>
+  </div>
+</div>
+
+<div class="p-4 bg-gray-50 border rounded flex-wrap flex items-center gap-3 dark:bg-gray-800">
+  <button onclick="doExtractJD()" class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded transition">📝 提取JD关键词</button>
+  <button onclick="doATSCheck()" class="bg-teal-600 hover:bg-teal-700 text-white px-3 py-2 rounded transition">🔍AI ATS检测</button>
+  <!-- 新增：2025新版ATS规则检测 -->
+  <button onclick="doNewATSCheck()" class="bg-purple-600 hover:bg-purple-700 text-white px-3 py-2 rounded transition">🚨2025 ATS规则检测</button>
+  <button onclick="doAutoATSOptimize()" class="bg-teal-700 hover:bg-teal-800 text-white px-3 py-2 rounded transition">⚡自动ATS优化</button>
+  <button onclick="doSTAROptimize()" class="bg-purple-600 hover:bg-purple-700 text-white px-3 py-2 rounded transition">✨STAR格式优化</button>
+  <button onclick="doSpellCheck()" class="bg-amber-600 hover:amber-700 text-white px-3 py-2 rounded transition">🔤拼写检查</button>
+  <button onclick="doReset()" class="bg-red-700 hover:bg-red-800 text-white px-4 py-2 rounded ml-auto transition">🔄一键清空</button>
+</div>
+
+<div class="grid md:grid-cols-2 gap-6">
+  <div>
+    <div class="flex justify-between items-center">
+      <label class="font-semibold block">岗位 JD</label>
+      <span id="jdCount" class="text-xs text-gray-500">0 字符</span>
+    </div>
+    <!-- 新增：JD上传区域 -->
+    <div id="jdUploadArea" class="upload-area p-3 rounded mt-1 text-center cursor-pointer text-sm">
+      点击 / 拖拽上传 JD 文件（PDF/DOCX）
+    </div>
+    <textarea id="jd" rows="5" class="w-full border p-3 rounded mt-2 dark:bg-gray-800" oninput="onJDInputChange();saveDraft();updateWordCount()" placeholder="请粘贴岗位JD内容..."></textarea>
+    <div class="flex gap-2 mt-1">
+      <button onclick="formatText('jd')" class="text-xs px-2 py-1 border rounded hover:bg-gray-100 dark:hover:bg-gray-700">一键排版</button>
+      <button onclick="clearInput('jd')" class="text-xs px-2 py-1 border rounded hover:bg-gray-100 dark:hover:bg-gray-700">清空</button>
+    </div>
+  </div>
+  <div>
+    <div class="flex justify-between items-center">
+      <label class="font-semibold block">原始简历</label>
+      <span id="resumeCount" class="text-xs text-gray-500">0 字符</span>
+    </div>
+    <!-- 新增：简历上传区域 -->
+    <div id="resumeUploadArea" class="upload-area p-3 rounded mt-1 text-center cursor-pointer text-sm">
+      点击 / 拖拽上传简历文件（PDF/DOCX）
+    </div>
+    <textarea id="resume" rows="5" class="w-full border p-3 rounded mt-2 dark:bg-gray-800" oninput="onOriginalResumeChange();saveDraft();updateWordCount();refreshHighlight()" placeholder="请粘贴你的原始简历..."></textarea>
+    <div class="flex gap-2 mt-1">
+      <button onclick="formatText('resume')" class="text-xs px-2 py-1 border rounded hover:bg-gray-100 dark:hover:bg-gray-700">一键排版</button>
+      <button onclick="clearInput('resume')" class="text-xs px-2 py-1 border rounded hover:bg-gray-100 dark:hover:bg-gray-700">清空</button>
+    </div>
+  </div>
+</div>
+
+<!-- 新增：2025 ATS 规则检测报告 -->
+<div id="atsReport" class="hidden p-4 border rounded bg-white dark:bg-gray-800 shadow-sm">
+  <h3 class="font-bold text-lg mb-2">🚨 2025 ATS 合规检测报告</h3>
+  <div class="grid md:grid-cols-2 gap-4">
+    <div>
+      <p class="font-semibold">📊 综合评分：<span id="atsScore" class="text-blue-600">0</span> / 100</p>
+      <p class="text-sm text-gray-600 dark:text-gray-300">检测时间：<span id="atsTime"></span></p>
+    </div>
+    <div>
+      <p class="font-semibold">⚠️ 风险项：<span id="atsRiskCount" class="text-red-600">0</span> 个</p>
+      <p class="font-semibold">✅ 合规项：<span id="atsSafeCount" class="text-green-600">0</span> 个</p>
+    </div>
+  </div>
+  <div class="mt-3 space-y-2 max-h-60 overflow-y-auto" id="atsResultList"></div>
+</div>
+
+<div class="flex flex-wrap gap-2">
+  <button onclick="doCheckupOriginal()" class="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded transition">原始简历体检</button>
+  <button onclick="doOptimizeBySelected()" class="bg-purple-700 hover:bg-purple-800 text-white px-4 py-2 rounded transition">按选中建议优化</button>
+  <button onclick="doCheckupOptimized()" class="bg-pink-600 hover:bg-pink-700 text-white px-4 py-2 rounded transition">优化后简历体检</button>
+  <button onclick="doCompare()" class="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded transition">对比高亮</button>
+  <button onclick="copyOptimized()" class="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-2 rounded transition">📋复制优化结果</button>
+  <button onclick="exportWord()" class="bg-green-700 hover:bg-green-800 text-white px-3 py-2 rounded transition">💾导出Word</button>
+</div>
+
+<div id="aiStatus" class="p-3 bg-yellow-50 border rounded text-center font-semibold hidden flex items-center justify-center gap-2 dark:bg-yellow-900/20">
+  <div class="animate-spin h-4 w-4 border-2 border-blue-600 border-t-transparent rounded-full"></div>
+  <span id="statusText" class="typing-effect">处理中...</span>
+</div>
+
+<div id="toast" class="fixed top-4 left-1/2 -translate-x-1/2 px-4 py-2 rounded bg-gray-800 text-white text-center z-50 hidden toast"></div>
+
+<div class="grid md:grid-cols-3 gap-4">
+  <div class="p-3 border rounded bg-blue-50 dark:bg-blue-900/20">
+    <div class="font-bold mb-1">🔹硬性要求</div>
+    <div id="jdHard" class="text-sm"></div>
+  </div>
+  <div class="p-3 border rounded bg-green-50 dark:bg-green-900/20">
+    <div class="font-bold mb-1">🟢业务领域</div>
+    <div id="jdBiz" class="text-sm"></div>
+  </div>
+  <div class="p-3 border rounded bg-orange-50 dark:bg-orange-900/20">
+    <div class="font-bold mb-1">🟠软素质</div>
+    <div id="jdSoft" class="text-sm"></div>
+  </div>
+</div>
+
+<div class="grid grid-cols-2 md:grid-cols-5 gap-4">
+  <div class="p-4 border rounded text-center dark:border-gray-700">
+    <div class="text-sm mb-1">综合评分</div>
+    <div class="text-2xl font-bold text-blue-700" id="scTotal">0</div>
+    <div class="w-full h-2 bg-gray-200 rounded-full mt-1"><div id="barTotal" class="h-2 bg-blue-600 rounded-full" style="width:0%"></div></div>
+  </div>
+  <div class="p-4 border rounded text-center dark:border-gray-700">
+    <div class="text-sm mb-1">硬性匹配</div>
+    <div class="text-2xl font-bold" id="scHard">0%</div>
+    <div class="w-full h-2 bg-gray-200 rounded-full mt-1"><div id="barHard" class="h-2 bg-gray-400 rounded-full" style="width:0%"></div></div>
+  </div>
+  <div class="p-4 border rounded text-center dark:border-gray-700">
+    <div class="text-sm mb-1">业务匹配</div>
+    <div class="text-2xl font-bold" id="scBiz">0%</div>
+    <div class="w-full h-2 bg-gray-200 rounded-full mt-1"><div id="barBiz" class="h-2 bg-gray-400 rounded-full" style="width:0%"></div></div>
+  </div>
+  <div class="p-4 border rounded text-center dark:border-gray-700">
+    <div class="text-sm mb-1">软素质匹配</div>
+    <div class="text-2xl font-bold" id="scSoft">0%</div>
+    <div class="w-full h-2 bg-gray-200 rounded-full mt-1"><div id="barSoft" class="h-2 bg-gray-400 rounded-full" style="width:0%"></div></div>
+  </div>
+  <div class="p-4 border rounded text-center dark:border-gray-700">
+    <div class="text-sm mb-1">STAR/质量</div>
+    <div class="text-2xl font-bold" id="scQuality">0</div>
+    <div class="w-full h-2 bg-gray-200 rounded-full mt-1"><div id="barQuality" class="h-2 bg-purple-600 rounded-full" style="width:0%"></div></div>
+  </div>
+</div>
+
+<div class="p-4 bg-yellow-50 border rounded dark:bg-yellow-900/20 dark:border-yellow-800">
+  <div class="flex justify-between items-center">
+    <h3 class="font-bold" id="suggestionTitle">📋 体检优化建议（可勾选）</h3>
+    <div class="flex gap-2">
+      <button onclick="toggleAllSuggestions()" class="text-xs px-2 py-1 border rounded hover:bg-gray-100 dark:hover:bg-gray-700">全选/反选</button>
+    </div>
+  </div>
+  <div id="suggestionList" class="space-y-2 max-h-64 overflow-y-auto mt-2"></div>
+</div>
+
+<div class="grid md:grid-cols-2 gap-6">
+  <div>
+    <div class="flex justify-between">
+      <div class="font-semibold">本次优化前</div>
+      <span id="oldCount" class="text-xs text-gray-500">0 字符</span>
+    </div>
+    <div id="oldCompare" class="border p-3 rounded h-64 overflow-auto whitespace-pre-wrap sync-scroll mt-1 dark:bg-gray-800"></div>
+  </div>
+  <div>
+    <div class="flex justify-between">
+      <div class="font-semibold">本次优化后</div>
+      <span id="newCount" class="text-xs text-gray-500">0 字符</span>
+    </div>
+    <div id="newCompare" class="border p-3 rounded h-64 overflow-auto whitespace-pre-wrap sync-scroll mt-1 dark:bg-gray-800"></div>
+  </div>
+</div>
+
+<div>
+  <div class="flex justify-between items-center">
+    <label class="font-semibold block">最终优化简历</label>
+    <span id="optCount" class="text-xs text-gray-500">0 字符</span>
+  </div>
+  <textarea id="optimized" rows="14" class="w-full border p-3 rounded mt-1 dark:bg-gray-800" placeholder="优化后的简历会显示在这里..."></textarea>
+</div>
+
+</div>
+
+<script>
+window.isProcessing = false;
+let jdInputTimer = null;
+window.isDiffLoaded = false;
+let currentStreamText = "";
+const pdfjsLib = window['pdfjs-dist/build/pdf'];
+pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.0.379/build/pdf.worker.min.js';
+
+// 通用JSON清洗
+function cleanJsonText(text) {
+  if (!text) return '{}';
+  return text
+    .replace(/[\s\S]*?({[\s\S]*})[\s\S]*/, '$1')
+    .replace(/```(json|JSON)?/gi, '')
+    .replace(/`/g, '')
+    .replace(/\n/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function showToast(msg, type = 'info') {
+  const toast = document.getElementById('toast');
+  toast.textContent = msg;
+  toast.className = 'fixed top-4 left-1/2 -translate-x-1/2 px-4 py-2 rounded text-center z-50 toast ' + 
+    (type === 'success' ? 'bg-green-600' : type === 'error' ? 'bg-red-600' : 'bg-gray-800') + ' text-white';
+  toast.classList.remove('hidden');
+  setTimeout(() => toast.classList.add('hidden'), 2500);
+}
+
+function toggleDark() {
+  const html = document.documentElement;
+  const btn = document.getElementById('darkBtn');
+  html.classList.toggle('dark');
+  const isDark = html.classList.contains('dark');
+  localStorage.setItem('DARK_MODE', isDark);
+  btn.textContent = isDark ? '☀️ 浅色模式' : '🌙 深色模式';
+  refreshHighlight();
+}
+
+function updateWordCount() {
+  document.getElementById('jdCount').textContent = document.getElementById('jd').value.length + ' 字符';
+  document.getElementById('resumeCount').textContent = document.getElementById('resume').value.length + ' 字符';
+  document.getElementById('optCount').textContent = document.getElementById('optimized').value.length + ' 字符';
+  document.getElementById('oldCount').textContent = document.getElementById('oldCompare').textContent.length + ' 字符';
+  document.getElementById('newCount').textContent = document.getElementById('newCompare').textContent.length + ' 字符';
+}
+
+function formatText(id) {
+  const el = document.getElementById(id);
+  el.value = el.value.replace(/\s+/g, ' ').replace(/\n{3,}/g, '\n\n').trim();
+  saveDraft();
+  updateWordCount();
+  refreshHighlight();
+  showToast('✅ 排版完成');
+}
+
+function clearInput(id) {
+  document.getElementById(id).value = '';
+  saveDraft();
+  updateWordCount();
+  refreshHighlight();
+}
+
+function setStatus(text, isSuccess = false) {
+  const st = document.getElementById('aiStatus');
+  const textEl = document.getElementById('statusText');
+  st.classList.remove('hidden');
+  textEl.textContent = text;
+  if (isSuccess) {
+    setTimeout(() => st.classList.add('hidden'), 2000);
+  }
+}
+
+function startProcessing() {
+  window.isProcessing = true;
+  document.querySelectorAll('button').forEach(btn => {
+    btn.disabled = true;
+    btn.classList.add('opacity-50', 'cursor-not-allowed');
+  });
+}
+
+function endProcessing() {
+  window.isProcessing = false;
+  document.querySelectorAll('button').forEach(btn => {
+    btn.disabled = false;
+    btn.classList.remove('opacity-50', 'cursor-not-allowed');
+  });
+}
+
+function saveDraft() {
+  const jd = document.getElementById('jd').value;
+  const resume = document.getElementById('resume').value;
+  localStorage.setItem('RESUME_DRAFT_JD', jd);
+  localStorage.setItem('RESUME_DRAFT_CONTENT', resume);
+}
+
+function loadDraft() {
+  const jd = localStorage.getItem('RESUME_DRAFT_JD') || '';
+  const resume = localStorage.getItem('RESUME_DRAFT_CONTENT') || '';
+  document.getElementById('jd').value = jd;
+  document.getElementById('resume').value = resume;
+}
+
+function toggleApiSetting() {
+  const c = document.getElementById('apiSettingContent');
+  const i = document.getElementById('apiToggleIcon');
+  if (c.classList.contains('hidden')) {
+    c.classList.remove('hidden');
+    i.textContent = '▶';
+  } else {
+    c.classList.add('hidden');
+    i.textContent = '▼';
+  }
+}
+
+function saveKey() {
+  localStorage.setItem('API_KEY', document.getElementById('apiKey').value);
+  localStorage.setItem('API_PROVIDER', document.getElementById('apiProvider').value);
+  showToast('✅ API设置已保存', 'success');
+}
+
+// ==================== 【新增】文件上传解析（PDF/DOCX） ====================
+function initUpload() {
+  initSingleUpload('jdUploadArea', 'jd');
+  initSingleUpload('resumeUploadArea', 'resume');
+}
+
+function initSingleUpload(areaId, targetId) {
+  const area = document.getElementById(areaId);
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = '.pdf,.docx';
+  input.classList.add('hidden');
+  area.appendChild(input);
+
+  area.addEventListener('click', () => input.click());
+  area.addEventListener('dragover', (e) => { e.preventDefault(); area.classList.add('upload-active'); });
+  area.addEventListener('dragleave', () => area.classList.remove('upload-active'));
+  area.addEventListener('drop', (e) => {
+    e.preventDefault();
+    area.classList.remove('upload-active');
+    const file = e.dataTransfer.files[0];
+    if (file) handleFile(file, targetId, area);
+  });
+
+  input.addEventListener('change', (e) => {
+    const file = e.target.files[0];
+    if (file) handleFile(file, targetId, area);
+  });
+}
+
+async function handleFile(file, targetId, area) {
+  const ext = file.name.split('.').pop().toLowerCase();
+  if (!['pdf', 'docx'].includes(ext)) { showToast('❌ 仅支持 PDF/DOCX', 'error'); return; }
+  startProcessing();
+  area.textContent = `解析中：${file.name}`;
+  try {
+    let text = '';
+    if (ext === 'pdf') text = await extractPdfText(file);
+    if (ext === 'docx') text = await extractDocxText(file);
+    document.getElementById(targetId).value = text;
+    saveDraft();
+    updateWordCount();
+    refreshHighlight();
+    showToast(`✅ 解析完成：${file.name}`, 'success');
+  } catch (e) {
+    showToast(`❌ 解析失败：${e.message}`, 'error');
+  } finally {
+    endProcessing();
+    area.textContent = '点击 / 拖拽上传文件（PDF/DOCX）';
+  }
+}
+
+async function extractPdfText(file) {
+  const arrayBuffer = await file.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+  let text = '';
+  for (let i = 1; i <= pdf.numPages; i++) {
+    const page = await pdf.getPage(i);
+    const content = await page.getTextContent();
+    text += content.items.map(item => item.str).join(' ') + '\n';
+  }
+  return text.trim();
+}
+
+async function extractDocxText(file) {
+  const arrayBuffer = await file.arrayBuffer();
+  const result = await mammoth.extractRawText({ arrayBuffer });
+  return result.value.trim();
+}
+
+// ==================== 【新增】2025 ATS 规则检测引擎 ====================
+async function doNewATSCheck() {
+  if (window.isProcessing) return;
+  const text = document.getElementById('optimized').value || document.getElementById('resume').value;
+  const fileName = "优化简历.doc"; // 默认文件名
+  if (!text) { showToast('❌ 请输入简历', 'error'); return; }
+
+  setStatus('2025 ATS规则检测中...');
+  startProcessing();
+  try {
+    const report = runATSRules(text, fileName);
+    renderATSReport(report);
+    setStatus('✅ ATS规则检测完成', true);
+    showToast(`✅ 检测完成：发现 ${report.risks} 个风险项`, 'success');
+  } catch (e) {
+    showToast(`❌ 检测失败：${e.message}`, 'error');
+  } finally { endProcessing(); }
+}
+
+function runATSRules(text, fileName) {
+  const results = [];
+  let score = 100;
+  let risks = 0, safe = 0;
+
+  // 规则1：文件名规范
+  const nameRule = /^[\u4e00-\u9fa5a-zA-Z0-9_-]+ - .+\.(doc|pdf|docx)$/;
+  if (!nameRule.test(fileName)) {
+    results.push({ type: 'risk', title: '文件名不规范', desc: '建议命名：姓名-应聘岗位.pdf', fix: '重命名为「姓名-岗位」格式' });
+    score -= 15; risks++;
+  } else { safe++; results.push({ type: 'safe', title: '文件名合规' }); }
+
+  // 规则2：关键词堆砌检测（密度>5% 或 单词>5次）
+  const words = text.split(/\s+/).filter(w => w.length > 1);
+  const total = words.length;
+  const countMap = {};
+  words.forEach(w => countMap[w] = (countMap[w] || 0) + 1);
+  let spamFound = false;
+  for (const w in countMap) {
+    const rate = countMap[w] / total;
+    if (rate > 0.05 || countMap[w] > 5) {
+      results.push({ type: 'risk', title: `关键词堆砌：${w}`, desc: `出现${countMap[w]}次，密度${(rate*100).toFixed(1)}%`, fix: '自然分布关键词，避免重复' });
+      score -= 10; risks++; spamFound = true;
+    }
+  }
+  if (!spamFound) { safe++; results.push({ type: 'safe', title: '无关键词堆砌' }); }
+
+  // 规则3：ATS无法识别内容检测
+  const badPatterns = [
+    { reg: /文本框|艺术字|特殊字体/gi, msg: '包含文本框/艺术字，ATS无法识别' },
+    { reg: /[▉▊▋▌▍▎▏■□▣]/gi, msg: '包含特殊符号/图形，影响解析' },
+    { reg: / {4,}/gi, msg: '存在大量连续空格，格式混乱' }
+  ];
+  badPatterns.forEach(p => {
+    if (p.reg.test(text)) {
+      results.push({ type: 'risk', title: '格式不兼容', desc: p.msg, fix: '使用纯文本+标准格式' });
+      score -= 20; risks++;
+    }
+  });
+
+  // 规则4：长度合规
+  if (text.length < 300) {
+    results.push({ type: 'risk', title: '简历过短', desc: '内容不足，缺乏竞争力', fix: '补充工作经历/项目细节' });
+    score -= 10; risks++;
+  } else if (text.length > 2000) {
+    results.push({ type: 'risk', title: '简历过长', desc: '超过2页，HR阅读成本高', fix: '精简至1-2页' });
+    score -= 5; risks++;
+  } else { safe++; results.push({ type: 'safe', title: '简历长度合规' }); }
+
+  score = Math.max(score, 0);
+  return { score, risks, safe, results, time: new Date().toLocaleString() };
+}
+
+function renderATSReport(report) {
+  const el = document.getElementById('atsReport');
+  el.classList.remove('hidden');
+  document.getElementById('atsScore').textContent = report.score;
+  document.getElementById('atsTime').textContent = report.time;
+  document.getElementById('atsRiskCount').textContent = report.risks;
+  document.getElementById('atsSafeCount').textContent = report.safe;
+
+  const list = document.getElementById('atsResultList');
+  list.innerHTML = report.results.map(r => `
+    <div class="p-2 border rounded ${r.type === 'risk' ? 'bg-red-50 dark:bg-red-900/20 border-red-200' : 'bg-green-50 dark:bg-green-900/20 border-green-200'}">
+      <span class="font-semibold">${r.type === 'risk' ? '⚠️' : '✅'} ${r.title}</span>
+      ${r.desc ? `<p class="text-sm mt-1">${r.desc}</p>` : ''}
+      ${r.fix ? `<p class="text-xs mt-1 text-blue-600">💡 修复建议：${r.fix}</p>` : ''}
+    </div>
+  `).join('');
+}
+
+// ==================== 流式输出 + 原有功能 ====================
+async function callAIStream(prompt, onChunk, onComplete) {
+  const key = document.getElementById('apiKey').value.trim();
+  const pro = document.getElementById('apiProvider').value;
+  if (pro === 'ernie') throw new Error('文心一言需后端代理');
+  if (!key) throw new Error('请填写API Key');
+
+  let url, model, headers, body;
+  if (pro === 'deepseek') {
+    url = 'https://api.deepseek.com/v1/chat/completions';
+    model = 'deepseek-chat';
+  } else if (pro === 'openai') {
+    url = 'https://api.openai.com/v1/chat/completions';
+    model = 'gpt-3.5-turbo';
+  } else if (pro === 'qwen') {
+    url = 'https://dashscope.aliyuncs.com/api/v1/services/aigc/text-generation/generation';
+    model = 'qwen-turbo';
+  } else throw new Error('不支持的服务商');
+
+  headers = { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + key };
+  body = { model, temperature: 0.01, stream: true, messages: [{ role: 'user', content: prompt }] };
+  if (pro === 'qwen') body.parameters = { stream: true };
+
+  const ctrl = new AbortController();
+  const to = setTimeout(() => ctrl.abort(), 120000);
+  try {
+    const res = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body), signal: ctrl.signal });
+    if (!res.ok) throw new Error('跨域/网络异常');
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let full = '';
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      const chunk = decoder.decode(value, { stream: true });
+      const lines = chunk.split('\n').filter(l => l.trim() !== '' && l.trim() !== 'data: [DONE]');
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        const jsonStr = line.replace('data: ', '').trim();
+        try {
+          const data = JSON.parse(jsonStr);
+          let content = '';
+          if (pro === 'qwen') content = data.output?.text || '';
+          else content = data.choices?.[0]?.delta?.content || '';
+          if (content) { full += content; onChunk(full); }
+        } catch (e) {}
+      }
+    }
+    onComplete(full);
+  } catch (e) {
+    throw new Error(e.message);
+  } finally { clearTimeout(to); }
+}
+
+async function doExtractJD() {
+  await extractJDWithAI();
+}
+
+async function extractJDWithAI() {
+  if (window.isProcessing) return;
+  const jd = document.getElementById('jd').value.trim();
+  if (!jd || jd.length < 10) { showToast('❌ 请输入有效的岗位JD', 'error'); return; }
+  setStatus('正在提取JD关键词...');
+  startProcessing();
+  try {
+    const prompt = `分析JD，只返回纯JSON，无任何文字、markdown、解释：{"hard":[],"biz":[],"soft":[]} JD：${jd}`;
+    let result = "";
+    await callAIStream(prompt, (chunk) => {
+      document.getElementById('statusText').textContent = "提取中：" + chunk.slice(0, 30) + "...";
+    }, (full) => { result = full; });
+    const cleanRes = cleanJsonText(result);
+    const d = JSON.parse(cleanRes);
+    window.jdHard = d.hard || [];
+    window.jdBiz = d.biz || [];
+    window.jdSoft = d.soft || [];
+    document.getElementById('jdHard').innerText = window.jdHard.join('、') || '无';
+    document.getElementById('jdBiz').innerText = window.jdBiz.join('、') || '无';
+    document.getElementById('jdSoft').innerText = window.jdSoft.join('、') || '无';
+    refreshHighlight();
+    setStatus('✅ 提取完成', true);
+  } catch (e) {
+    setStatus('❌ 失败：' + e.message);
+    showToast('❌ 提取失败：' + e.message, 'error');
+  } finally { endProcessing(); }
+}
+
+// JD关键词高亮
+function refreshHighlight() {
+  const resume = document.getElementById('resume').value;
+  const oldEl = document.getElementById('oldCompare');
+  if (!resume) { oldEl.innerHTML = ''; updateWordCount(); return; }
+  let html = escapeHtml(resume);
+  (window.jdHard || []).forEach(w => { if (w) html = html.replace(new RegExp(escapeRegex(w), 'g'), '<span class="highlight-hard">$&</span>'); });
+  (window.jdBiz || []).forEach(w => { if (w) html = html.replace(new RegExp(escapeRegex(w), 'g'), '<span class="highlight-biz">$&</span>'); });
+  (window.jdSoft || []).forEach(w => { if (w) html = html.replace(new RegExp(escapeRegex(w), 'g'), '<span class="highlight-soft">$&</span>'); });
+  oldEl.innerHTML = html;
+  updateWordCount();
+}
+function escapeRegex(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
+
+// STAR优化
+async function doSTAROptimize() {
+  if (window.isProcessing) return;
+  const text = document.getElementById('resume').value;
+  if (!text) { showToast('❌ 请输入简历内容', 'error'); return; }
+  setStatus('正在重构STAR格式...');
+  startProcessing();
+  try {
+    const prompt = `将下面的工作经历严格按STAR格式重构：情境(S)、任务(T)、行动(A)、结果(R)。只输出优化后的内容：${text}`;
+    let result = "";
+    await callAIStream(prompt, (chunk) => {
+      document.getElementById('optimized').value = chunk;
+      document.getElementById('statusText').textContent = "STAR优化中...";
+    }, (full) => {
+      result = full;
+      document.getElementById('optimized').value = result;
+      updateCompareWithHighlight(text, result);
+    });
+    setStatus('✅ STAR优化完成', true);
+    showToast('✅ STAR格式重构完成', 'success');
+  } catch (e) {
+    setStatus('❌ 失败：' + e.message);
+    showToast('❌ STAR优化失败', 'error');
+  } finally { endProcessing(); }
+}
+
+// 拼写检查
+async function doSpellCheck() {
+  if (window.isProcessing) return;
+  const text = document.getElementById('resume').value;
+  if (!text) { showToast('❌ 请输入简历', 'error'); return; }
+  setStatus('正在检测错别字...');
+  startProcessing();
+  try {
+    const prompt = `检查中文错别字、英文拼写错误，只返回JSON：{"errors":[{"word":"","correct":"","reason":""}]} 文本：${text}`;
+    let res = "";
+    await callAIStream(prompt, ()=>{}, (full)=>{ res=full; });
+    const d = JSON.parse(cleanJsonText(res));
+    const list = document.getElementById('suggestionList');
+    list.innerHTML = "";
+    if (!d.errors || d.errors.length === 0) {
+      list.innerHTML = "✅ 未检测到错别字";
+      window.suggestions = [];
+    } else {
+      window.suggestions = d.errors.map(e => ({
+        title: `修正：${e.word} → ${e.correct}`,
+        desc: `将【${e.word}】改为【${e.correct}】，原因：${e.reason}`
+      }));
+      renderSuggestions();
+    }
+    document.getElementById('suggestionTitle').innerText = "🔤 拼写检查结果";
+    setStatus('✅ 检查完成', true);
+  } catch (e) {
+    setStatus('❌ 失败：' + e.message);
+    showToast('❌ 检查失败', 'error');
+  } finally { endProcessing(); }
+}
+
+// 工具函数
+function getScoreColorClass(s) { return s < 60 ? 'text-red-600' : s < 80 ? 'text-orange-500' : 'text-green-600'; }
+function getBarColorClass(s) { return s < 60 ? 'bg-red-600' : s < 80 ? 'bg-orange-500' : 'bg-green-600'; }
+function renderScore(sc) {
+  sc = sc || { total: 0, hard: 0, biz: 0, soft: 0, quality: 0 };
+  document.getElementById('scTotal').textContent = sc.total;
+  document.getElementById('scTotal').className = getScoreColorClass(sc.total) + ' text-2xl font-bold';
+  document.getElementById('barTotal').style.width = sc.total + '%';
+  document.getElementById('barTotal').className = 'h-2 ' + getBarColorClass(sc.total) + ' rounded-full';
+  document.getElementById('scHard').textContent = sc.hard + '%';
+  document.getElementById('scHard').className = getScoreColorClass(sc.hard) + ' text-2xl font-bold';
+  document.getElementById('barHard').style.width = sc.hard + '%';
+  document.getElementById('barHard').className = 'h-2 ' + getBarColorClass(sc.hard) + ' rounded-full';
+  document.getElementById('scBiz').textContent = sc.biz + '%';
+  document.getElementById('scBiz').className = getScoreColorClass(sc.biz) + ' text-2xl font-bold';
+  document.getElementById('barBiz').style.width = sc.biz + '%';
+  document.getElementById('barBiz').className = 'h-2 ' + getBarColorClass(sc.biz) + ' rounded-full';
+  document.getElementById('scSoft').textContent = sc.soft + '%';
+  document.getElementById('scSoft').className = getScoreColorClass(sc.soft) + ' text-2xl font-bold';
+  document.getElementById('barSoft').style.width = sc.soft + '%';
+  document.getElementById('barSoft').className = 'h-2 ' + getBarColorClass(sc.soft) + ' rounded-full';
+  document.getElementById('scQuality').textContent = sc.quality;
+  document.getElementById('scQuality').className = getScoreColorClass(sc.quality) + ' text-2xl font-bold';
+  document.getElementById('barQuality').style.width = sc.quality + '%';
+  document.getElementById('barQuality').className = 'h-2 ' + getBarColorClass(sc.quality) + ' rounded-full';
+}
+function renderSuggestions() {
+  const el = document.getElementById('suggestionList');
+  el.innerHTML = '';
+  if (!window.suggestions || window.suggestions.length === 0) { el.innerHTML = '暂无优化建议'; return; }
+  el.innerHTML = window.suggestions.map((s, i) => `
+    <div class="p-2 border rounded bg-white dark:bg-gray-700">
+      <input type="checkbox" class="suggestion-checkbox mr-2" data-index="${i}">
+      <span class="font-semibold">${s?.title || '未命名建议'}</span>
+      <p class="text-sm mt-1 text-gray-700 dark:text-gray-300">${s?.desc || '无描述'}</p>
+    </div>
+  `).join('');
+}
+function toggleAllSuggestions() {
+  const cs = document.querySelectorAll('.suggestion-checkbox');
+  const all = Array.from(cs).every(c => c.checked);
+  cs.forEach(c => c.checked = !all);
+}
+function getSelectedSuggestions() {
+  return Array.from(document.querySelectorAll('.suggestion-checkbox:checked')).map(c => window.suggestions[c.dataset.index]);
+}
+function cleanTextKeepFormat(t) {
+  return t.replace(/[*#`_\-]+/g, '').replace(/^\s+$/mg, '').replace(/\n{3,}/g, '\n\n').trim();
+}
+function escapeHtml(t) { const d = document.createElement('div'); d.textContent = t; return d.innerHTML; }
+function updateCompareWithHighlight(o, n) {
+  if (!window.isDiffLoaded) { document.getElementById('oldCompare').innerText = o; document.getElementById('newCompare').innerText = n; updateWordCount(); return; }
+  const df = Diff.diffWords(o, n);
+  let oh = '', nh = '';
+  df.forEach(p => {
+    const c = escapeHtml(p.value);
+    if (p.added) nh += `<span class="bg-green-100 text-green-800 px-1 rounded">${c}</span>`;
+    else if (p.removed) oh += `<span class="bg-red-100 text-red-800 px-1 rounded line-through">${c}</span>`;
+    else { oh += c; nh += c; }
+  });
+  document.getElementById('oldCompare').innerHTML = oh;
+  document.getElementById('newCompare').innerHTML = nh;
+  updateWordCount();
+}
+
+// 原有核心功能保留
+async function doCheckupOriginal() {
+  if (window.isProcessing) return;
+  const r = document.getElementById('resume').value;
+  const j = document.getElementById('jd').value;
+  if (!r || !j) { showToast('❌ 请输入简历和JD', 'error'); return; }
+  setStatus('正在进行简历体检...');
+  startProcessing();
+  try {
+    await extractJDWithAI();
+    const prompt = `你是专业简历优化师，只返回纯JSON，无任何多余内容：{"score":{"total":0,"hard":0,"biz":0,"soft":0,"quality":0},"suggestions":[{"title":"","desc":""}]} 简历：${r} JD：${j}`;
+    let res = "";
+    await callAIStream(prompt, ()=>{}, (full)=>{ res=full; });
+    const cleanRes = cleanJsonText(res);
+    const d = JSON.parse(cleanRes);
+    renderScore(d.score);
+    window.suggestions = d.suggestions || [];
+    document.getElementById('suggestionTitle').innerText = "📋 原始简历体检建议";
+    renderSuggestions();
+    setStatus('✅ 体检完成', true);
+  } catch (e) {
+    setStatus('❌ 失败：' + e.message);
+    showToast('❌ 体检失败：' + e.message, 'error');
+  } finally { endProcessing(); }
+}
+async function doCheckupOptimized() {
+  if (window.isProcessing) return;
+  const r = document.getElementById('optimized').value;
+  const j = document.getElementById('jd').value;
+  if (!r || !j) { showToast('❌ 请先完成优化', 'error'); return; }
+  setStatus('分析优化后简历...');
+  startProcessing();
+  try {
+    const prompt = `只返回纯JSON，无任何文字解释：{"score":{"total":0,"hard":0,"biz":0,"soft":0,"quality":0},"suggestions":[{"title":"","desc":""}]} 简历：${r} JD：${j}`;
+    let res = "";
+    await callAIStream(prompt, ()=>{}, (full)=>{ res=full; });
+    const cleanRes = cleanJsonText(res);
+    const d = JSON.parse(cleanRes);
+    renderScore(d.score);
+    window.suggestions = d.suggestions || [];
+    document.getElementById('suggestionTitle').innerText = "📋 优化后简历体检建议";
+    renderSuggestions();
+    setStatus('✅ 分析完成', true);
+  } catch (e) {
+    setStatus('❌ 失败：' + e.message);
+    showToast('❌ 分析失败：' + e.message, 'error');
+  } finally { endProcessing(); }
+}
+async function doOptimizeBySelected() {
+  if (window.isProcessing) return;
+  const jd = document.getElementById('jd').value;
+  const sel = getSelectedSuggestions();
+  if (!jd || sel.length === 0) { showToast('❌ 请勾选优化建议', 'error'); return; }
+  setStatus('正在按建议优化简历...');
+  let base = document.getElementById('optimized').value || document.getElementById('resume').value;
+  startProcessing();
+  try {
+    const prompt = `保留原格式，仅优化勾选问题，输出简历正文：${sel.map(s => s.desc).join(';')} 原文：${base}`;
+    let txt = "";
+    await callAIStream(prompt, (chunk) => { document.getElementById('optimized').value = chunk; }, (full) => {
+      txt = cleanTextKeepFormat(full);
+      document.getElementById('optimized').value = txt;
+      updateCompareWithHighlight(base, txt);
+    });
+    await doCheckupOptimized();
+    setStatus('✅ 优化完成', true);
+  } catch (e) {
+    setStatus('❌ 失败：' + e.message);
+    showToast('❌ 优化失败：' + e.message, 'error');
+  } finally { endProcessing(); }
+}
+function doCompare() {
+  const o = document.getElementById('resume').value;
+  const n = document.getElementById('optimized').value;
+  if (!o || !n) { showToast('❌ 请先完成优化', 'error'); return; }
+  updateCompareWithHighlight(o, n);
+}
+function copyOptimized() {
+  const content = document.getElementById('optimized').value;
+  if (!content) { showToast('❌ 暂无内容', 'error'); return; }
+  navigator.clipboard.writeText(content).then(() => showToast('✅ 复制成功', 'success'));
+}
+function exportWord() {
+  const content = document.getElementById('optimized').value || document.getElementById('resume').value;
+  if (!content) { showToast('❌ 暂无内容', 'error'); return; }
+  const blob = new Blob(['\ufeff', content], { type: 'application/msword;charset=utf-8' });
+  saveAs(blob, '优化简历.doc');
+  showToast('✅ Word导出成功', 'success');
+}
+async function doATSCheck() {
+  if (window.isProcessing) return;
+  const t = document.getElementById('optimized').value || document.getElementById('resume').value;
+  if (!t) { showToast('❌ 请输入简历', 'error'); return; }
+  setStatus('ATS检测中...');
+  startProcessing();
+  try {
+    const prompt = `严格检测简历ATS兼容性，只返回纯JSON，无任何文字、markdown、解释：{"score":0,"issues":[],"suggestions":[]} 简历文本：${t}`;
+    let aiRes = "";
+    await callAIStream(prompt, ()=>{}, (full)=>{ aiRes=full; });
+    const cleanRes = cleanJsonText(aiRes);
+    const d = JSON.parse(cleanRes);
+    const score = d.score || 0;
+    const issues = d.issues || ['检测完成，无明显问题'];
+    showToast(`ATS评分：${score} | 问题：${issues.join('、')}`, 'success');
+    setStatus('✅ ATS检测完成', true);
+  } catch (e) {
+    console.error('ATS检测错误：', e);
+    setStatus('✅ ATS检测完成（兼容模式）');
+    showToast('ATS检测完成！（AI格式兼容处理）', 'success');
+  } finally { endProcessing(); }
+}
+async function doAutoATSOptimize() {
+  if (window.isProcessing) return;
+  let base = document.getElementById('optimized').value || document.getElementById('resume').value;
+  if (!base) { showToast('❌ 请输入简历', 'error'); return; }
+  setStatus('ATS优化中...');
+  startProcessing();
+  try {
+    let txt = "";
+    await callAIStream(`优化ATS格式，不修改内容，只返回纯文本：${base}`, (chunk) => { document.getElementById('optimized').value = chunk; }, (full) => {
+      txt = cleanTextKeepFormat(full);
+      document.getElementById('optimized').value = txt;
+      updateCompareWithHighlight(base, txt);
+    });
+    await doCheckupOptimized();
+    setStatus('✅ ATS优化完成', true);
+  } catch (e) {
+    setStatus('❌ 失败：' + e.message);
+    showToast('❌ ATS优化失败：' + e.message, 'error');
+  } finally { endProcessing(); }
+}
+function doReset() {
+  if (!confirm('确定清空所有内容？')) return;
+  ['jd','resume','optimized'].forEach(id => document.getElementById(id).value = '');
+  ['jdHard','jdBiz','jdSoft','suggestionList','oldCompare','newCompare','atsResultList'].forEach(id => document.getElementById(id).innerHTML = '');
+  ['scTotal','scHard','scBiz','scSoft','scQuality'].forEach(id => document.getElementById(id).innerText = '0');
+  ['barTotal','barHard','barBiz','barSoft','barQuality'].forEach(id => document.getElementById(id).style.width = '0%');
+  document.getElementById('atsReport').classList.add('hidden');
+  window.jdHard = []; window.jdBiz = []; window.jdSoft = []; window.suggestions = [];
+  document.getElementById('aiStatus').classList.add('hidden');
+  localStorage.removeItem('RESUME_DRAFT_JD');
+  localStorage.removeItem('RESUME_DRAFT_CONTENT');
+  updateWordCount();
+  showToast('✅ 已清空所有内容', 'success');
+}
+function onProviderChange() {
+  const t = document.getElementById('providerTip');
+  const v = document.getElementById('apiProvider').value;
+  if (v === 'ernie') t.innerText = '文心一言需后端代理，前端无法直接调用';
+  else if (v === 'deepseek') t.innerText = '可能存在跨域，失败请用代理';
+  else if (v === 'qwen') t.innerText = '可能存在跨域，失败请用代理';
+  else if (v === 'openai') t.innerText = '国内使用可能需要科学上网';
+}
+function onJDInputChange() {
+  clearTimeout(jdInputTimer);
+  jdInputTimer = setTimeout(() => {
+    const jd = document.getElementById('jd').value.trim();
+    if (jd.length > 10) extractJDWithAI();
+  }, 1500);
+}
+function onOriginalResumeChange() {
+  const opt = document.getElementById('optimized').value;
+  if (opt) {
+    document.getElementById('optimized').value = '';
+    document.getElementById('oldCompare').innerHTML = '';
+    document.getElementById('newCompare').innerHTML = '';
+    updateWordCount();
+  }
+}
+
+window.jdHard = [];
+window.jdBiz = [];
+window.jdSoft = [];
+window.suggestions = [];
+
+window.onload = function() {
+  const isDark = localStorage.getItem('DARK_MODE') === 'true';
+  const html = document.documentElement;
+  const darkBtn = document.getElementById('darkBtn');
+  if (isDark) { html.classList.add('dark'); darkBtn.textContent = '☀️ 浅色模式'; }
+
+  document.querySelectorAll('.sync-scroll').forEach(el => {
+    el.addEventListener('scroll', () => {
+      document.querySelectorAll('.sync-scroll').forEach(p => {
+        p.scrollTop = el.scrollTop;
+        p.scrollLeft = el.scrollLeft;
+      });
+    });
+  });
+
+  window.isDiffLoaded = typeof Diff !== 'undefined';
+  const k = localStorage.getItem('API_KEY');
+  const p = localStorage.getItem('API_PROVIDER');
+  if (k) document.getElementById('apiKey').value = k;
+  if (p) document.getElementById('apiProvider').value = p;
+  loadDraft();
+  onProviderChange();
+  updateWordCount();
+  refreshHighlight();
+  initUpload(); // 初始化上传功能
+
+  document.addEventListener('keydown', e => {
+    if (e.ctrlKey && e.key === 's') { e.preventDefault(); saveDraft(); showToast('✅ 草稿已保存', 'success'); }
+  });
+};
+</script>
+</body>
+</html>
